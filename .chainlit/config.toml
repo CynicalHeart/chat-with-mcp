@@ -1,0 +1,120 @@
+[project]
+# 是否启用遥测功能（默认：true）。不会收集个人数据。
+enable_telemetry = true
+
+
+# 每个用户需要提供的环境变量列表，用于使用应用程序。
+user_env = []
+
+# 连接丢失时会话保存的持续时间（以秒为单位）
+session_timeout = 3600
+
+# 用户会话过期的持续时间（以秒为单位）
+user_session_timeout = 1296000 # 15 天
+
+# 启用第三方缓存（例如，LangChain 缓存）
+cache = false
+
+# 授权的来源
+allow_origins = ["*"]
+
+[features]
+# 处理和显示消息中的 HTML。这可能存在安全风险（参见 https://stackoverflow.com/questions/19603097/why-is-it-dangerous-to-render-user-generated-html-or-javascript）
+unsafe_allow_html = false
+
+# 处理和显示数学表达式。这可能与消息中的 "$" 字符冲突。
+latex = false
+
+# 在窗口顶部自动滚动新的用户消息
+user_message_autoscroll = true
+
+# 自动使用当前聊天配置文件标记线程（如果使用了聊天配置文件）
+auto_tag_thread = true
+
+# 允许用户编辑自己的消息
+edit_message = true
+
+# 授权用户自发上传文件与消息
+[features.spontaneous_file_upload]
+enabled = true
+# 使用 MIME 类型定义接受的文件类型
+# 示例：
+# 1. 对于特定文件类型：
+#    accept = ["image/jpeg", "image/png", "application/pdf"]
+# 2. 对于某些类型的所有文件：
+#    accept = ["image/*", "audio/*", "video/*"]
+# 3. 对于特定文件扩展名：
+#    accept = { "application/octet-stream" = [".xyz", ".pdb"] }
+# 注意：不建议使用 "*/*"，因为它可能导致浏览器警告
+accept = ["*/*"]
+max_files = 20
+max_size_mb = 500
+
+[features.audio]
+# 音频的采样率
+sample_rate = 24000
+
+[features.mcp.sse]
+enabled = true
+
+[features.mcp.stdio]
+enabled = false
+# 只有允许列表中的可执行文件才能用于 MCP stdio 服务器。
+# 只需要可执行文件的基本名称，例如 "npx"，而不是 "/usr/bin/npx"。
+# 现在请不要注释这一行，我们需要它来解析可执行文件名。
+allowed_executables = ["npx", "uvx"]
+
+[UI]
+# 助手的名称。
+name = "Assistant"
+
+# default_theme = "dark"
+
+#layout = "wide"
+
+# default_sidebar_state = "open"
+
+# 助手的描述。这用于 HTML 标签。
+description = "个人云平台数字助手"
+
+# 思维链（CoT）显示模式。可以是 "hidden"、"tool_call" 或 "full"。
+cot = "full"
+
+# 指定可用于自定义用户界面的 CSS 文件。
+# CSS 文件可以从公共目录提供或通过外部链接提供。
+# custom_css = "/public/test.css"
+
+# 为自定义 CSS 文件指定其他属性
+# custom_css_attributes = "media=\"print\""
+
+# 指定可用于自定义用户界面的 JavaScript 文件。
+# JavaScript 文件可以从公共目录提供。
+# custom_js = "/public/test.js"
+
+# 为自定义 JS 文件指定其他属性
+# custom_js_attributes = "async type = \"module\""
+
+# 自定义登录页面图片，相对于公共目录或外部 URL
+# login_page_image = "/public/custom-background.jpg"
+
+# 自定义登录页面图片过滤器（Tailwind 内部过滤器，无暗/亮变体）
+# login_page_image_filter = "brightness-50 grayscale"
+# login_page_image_dark_filter = "contrast-200 blur-sm"
+
+# 指定自定义元图片 URL。
+# custom_meta_image_url = "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
+
+# 为前端指定自定义构建目录。
+# 这可用于自定义前端代码。
+# 注意：如果这是相对路径，不应以斜杠开头。
+# custom_build = "./public/build"
+
+# 在标题中指定一个或多个可选的自定义链接。
+# [[UI.header_links]]
+#     name = "Issues"
+#     display_name = "Report Issue"
+#     icon_url = "https://avatars.githubusercontent.com/u/128686189?s=200&v=4"
+#     url = "https://github.com/Chainlit/chainlit/issues"
+
+[meta]
+generated_by = "2.5.5"
