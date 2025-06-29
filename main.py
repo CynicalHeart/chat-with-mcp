@@ -43,7 +43,14 @@ async def starters():
 async def on_chat_start():
     """聊天配置设置"""
     cl.logger.info("用户开始聊天")
-    cl.user_session.set("chat_messages", [])  # 手动维护聊天上下文
+    msg = [
+        {
+            "role": "system",
+            "content": "你是一个AI助手，请判断用户的此次问题是否需要调用工具，务必以结构化数据返回，不要有任何解释。",
+        },
+    ]
+    cl.logger.info(msg=f"{msg=}")
+    cl.user_session.set("chat_messages", msg)  # 手动维护聊天上下文
 
 
 @cl.on_chat_end
@@ -67,13 +74,17 @@ def on_stop():
 @cl.on_message
 async def on_message(message: cl.Message):
     """处理用户消息"""
-    cl.logger.info(f"用户消息: {message.content}")
-    # chat_messages = cl.user_session.get("chat_messages")  # 历史消息记录
-    msg = cl.Message(content="")
+    cl.logger.info(f"来自用户的消息为: {message.content}")
+    prompt = {
+        "role": "user",
+        "content": message.content,
+    }
+    chat_messages: list[dict] = cl.user_session.get("chat_messages")
+    chat_messages.append(prompt)
+
     # 1、第一次调用AI，携带tools，获取用户意图
-    response_json = await analyze_behavior(message.content)
+    response_json = await call_llm(chat_messages, tool_list)
     cl.logger.info(f"分析用户行为: {response_json}")
-    await msg.send()
     # 2、解析结果，判断是否需要调用工具
 
     # 3、如果需要调用工具，则调用工具，使用MCP方式调用，并function call方式
@@ -100,34 +111,31 @@ async def on_message(message: cl.Message):
     # await msg.update()
 
 
-async def analyze_behavior(user_question: str):
+async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
     """分析用户行为"""
-    # TODO 获取tools，将MCP格式的tools转换为OpenAI格式的tools
-    response = await client.chat.completions.create(
+    msg = cl.Message(content="")
+    # 获取tools，将MCP格式的tools转换为OpenAI格式的tools
+    stream = await client.chat.completions.create(
         model="deepseek-chat",
-        messages=[
-            {
-                "role": "system",
-                "content": "你是一个AI助手，请判断用户的此次问题是否需要调用工具，务必以结构化数据返回，不要有任何解释。",
-            },
-            {
-                "role": "user",
-                "content": user_question,
-            },
-        ],
+        messages=chat_question,
         max_tokens=1024,
-        temperature=0.5,
-        stream=False,
+        temperature=0.7,
+        stream=True,
         tools=tool_list,
-        response_format={"type": "json_object"},
     )
-    cl.logger.info(f"分析用户行为: {response}")
-    try:
-        response_json = json.loads(response.choices[0].message.content)
-        return response_json
-    except Exception as e:
-        cl.logger.error(f"分析用户行为失败: {e}")
-        return None
+    use_tool = False  # 是否使用了工具
+    tools_param = []
+    async for chunk in stream:
+        delta = chunk.choices[0].delta  # 增量内容：ChoiceDelta
+        if delta.content:
+            await msg.stream_token(delta.content)
+        if delta.tool_calls:
+            use_tool = True if not use_tool else use_tool
+            tools_param.append(delta.tool_calls[0])
+    if use_tool:
+        cl.logger.info(f"工具调用参数: {tools_param}")
+    else:
+        await msg.update()
 
 
 @cl.on_mcp_connect

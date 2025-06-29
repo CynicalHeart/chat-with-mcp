@@ -1,4 +1,6 @@
 # 工具列表
+from openai import OpenAI
+
 tool_list = [
     {
         "type": "function",
@@ -63,3 +65,45 @@ tool_list = [
         },
     },
 ]
+
+
+if __name__ == "__main__":
+    # 调用deepseek，进行意图实验测试
+    client = OpenAI(
+        api_key="",
+        base_url="https://api.deepseek.com",
+    )
+
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[
+            {
+                "role": "system",
+                "content": "你是一个AI助手，请简单明了的回答用户的问题，不要有任何解释。",
+            },
+            {
+                "role": "user",
+                "content": "当前北京时间是多少？明天此地点的天气如何？",
+            },
+        ],
+        max_tokens=1024,
+        temperature=0.5,
+        stream=True,
+        tools=tool_list,
+    )
+
+    tools_param = {}
+    for chunk in response:
+        delta = chunk.choices[0].delta
+        print(f"增量内容：{delta}")
+        if hasattr(delta, "content") and delta.content:
+            print(f"响应内容：{delta.content}", end="", flush=True)
+        if hasattr(delta, "tool_calls") and delta.tool_calls:
+            curr_tool = delta.tool_calls[0]
+            param = tools_param.get(curr_tool.index, "")
+            tools_param[curr_tool.index] = param + curr_tool.function.arguments
+        print("\n")
+    print("工具参数：", tools_param)
+    # print(
+    #     f"响应原因：{response.choices[0].finish_reason}, 响应内容{response.choices[0].message}"
+    # )
