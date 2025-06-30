@@ -1,6 +1,10 @@
 # 工具列表
-from openai import OpenAI
+import asyncio
+from openai import AsyncOpenAI
+from itertools import groupby
+from operator import attrgetter
 
+# 示例工作列表
 tool_list = [
     {
         "type": "function",
@@ -67,14 +71,54 @@ tool_list = [
 ]
 
 
-if __name__ == "__main__":
+def deal_with_tool_call(tools_param: list) -> list[dict]:
+    """
+    处理流中所有的切片，组装最终报文
+    :param tool_call: 流式切片集，包括可能多个工具调用信息
+    :return: 工具调用的最终参数（需要存储到历史记录的信息）
+    """
+    tool_calls = []
+    groups = group_by_index(tools_param)
+    for group in groups:
+        tool = {}
+        function = {}
+        args = []
+        # 处理每个分组中的工具调用
+        for item in group:
+            if item.id:
+                tool["id"] = item.id
+            if item.function.name:
+                function["name"] = item.function.name
+            args.append(item.function.arguments)
+        tool["type"] = "function"
+        args = "".join(args)
+        print(f"处理工具调用参数: {args}")
+        if args:
+            function["arguments"] = args
+        tool["function"] = function
+        tool_calls.append(tool)
+    return tool_calls
+
+
+def group_by_index(data):
+    """
+    按 index 字段对连续元素分组。
+    仅当 data 中相同 index 值总是相邻出现时才正确。
+    """
+    grouped = []
+    for _, group in groupby(data, key=attrgetter("index")):
+        grouped.append(list(group))
+    return grouped  # 二维
+
+
+async def main():
     # 调用deepseek，进行意图实验测试
-    client = OpenAI(
+    client = AsyncOpenAI(
         api_key="",
         base_url="https://api.deepseek.com",
     )
 
-    response = client.chat.completions.create(
+    stream = await client.chat.completions.create(
         model="deepseek-chat",
         messages=[
             {
@@ -92,18 +136,18 @@ if __name__ == "__main__":
         tools=tool_list,
     )
 
-    tools_param = {}
-    for chunk in response:
+    tools_param = []
+    async for chunk in stream:
         delta = chunk.choices[0].delta
         print(f"增量内容：{delta}")
         if hasattr(delta, "content") and delta.content:
             print(f"响应内容：{delta.content}", end="", flush=True)
         if hasattr(delta, "tool_calls") and delta.tool_calls:
-            curr_tool = delta.tool_calls[0]
-            param = tools_param.get(curr_tool.index, "")
-            tools_param[curr_tool.index] = param + curr_tool.function.arguments
+            tools_param.append(delta.tool_calls[0])
         print("\n")
-    print("工具参数：", tools_param)
-    # print(
-    #     f"响应原因：{response.choices[0].finish_reason}, 响应内容{response.choices[0].message}"
-    # )
+    tool_calls = deal_with_tool_call(tools_param)
+    print(f"最终工具调用参数: {tool_calls}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

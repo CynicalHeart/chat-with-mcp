@@ -112,9 +112,9 @@ async def on_message(message: cl.Message):
 
 
 async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
-    """分析用户行为"""
+    """调用AI模型，通过AI判断是否调用工具"""
     msg = cl.Message(content="")
-    # 获取tools，将MCP格式的tools转换为OpenAI格式的tools
+
     stream = await client.chat.completions.create(
         model="deepseek-chat",
         messages=chat_question,
@@ -123,6 +123,7 @@ async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
         stream=True,
         tools=tool_list,
     )
+
     use_tool = False  # 是否使用了工具
     tools_param = []
     async for chunk in stream:
@@ -134,8 +135,15 @@ async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
             tools_param.append(delta.tool_calls[0])
     if use_tool:
         cl.logger.info(f"工具调用参数: {tools_param}")
+        # TODO: 处理工具调用参数，调用对应的工具
+
+        return use_tool, {}
     else:
         await msg.update()
+        return use_tool, {
+            "role": "assistant",
+            "content": msg.content,
+        }
 
 
 @cl.on_mcp_connect
