@@ -5,7 +5,7 @@ import chainlit as cl
 from mcp import ClientSession
 from openai import AsyncOpenAI
 
-from common import tool_list
+from common import tool_list, deal_with_tool_call
 
 load_dotenv()
 
@@ -81,34 +81,16 @@ async def on_message(message: cl.Message):
     }
     chat_messages: list[dict] = cl.user_session.get("chat_messages")
     chat_messages.append(prompt)
+    mcp_tool = cl.user_session.set("mcp_tools", {})
 
     # 1、第一次调用AI，携带tools，获取用户意图
-    response_json = await call_llm(chat_messages, tool_list)
-    cl.logger.info(f"分析用户行为: {response_json}")
+    use_tool, resp = await call_llm(chat_messages, tool_list)
+    cl.logger.info(f"是否使用工具：{use_tool}, 调用LLM结果：{resp=}")
     # 2、解析结果，判断是否需要调用工具
 
     # 3、如果需要调用工具，则调用工具，使用MCP方式调用，并function call方式
 
     # 4、将调用的工具的结果，拼接到用户的提示词中，再次调用AI，流式返回结果
-
-    # stream = await client.chat.completions.create(
-    #     model="deepseek-chat",
-    #     messages=[
-    #         {
-    #             "role": "system",
-    #             "content": "你是一个AI助手，请用最简单明了的语言回答用户的问题。",
-    #         },
-    #         *cl.chat_context.to_openai(),
-    #     ],
-    #     max_tokens=1024,
-    #     temperature=0.7,
-    #     stream=True,
-    # )
-    # async for chunk in stream:
-    #     if token := chunk.choices[0].delta.content or "":
-    #         await msg.stream_token(token)
-
-    # await msg.update()
 
 
 async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
@@ -135,9 +117,13 @@ async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
             tools_param.append(delta.tool_calls[0])
     if use_tool:
         cl.logger.info(f"工具调用参数: {tools_param}")
-        # TODO: 处理工具调用参数，调用对应的工具
-
-        return use_tool, {}
+        # 处理工具调用参数，调用对应的工具
+        tool_calls = deal_with_tool_call(tools_param)
+        return use_tool, {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": tool_calls,
+        }
     else:
         await msg.update()
         return use_tool, {
@@ -162,8 +148,9 @@ async def on_mcp(connection, session: ClientSession):
 
     mcp_tools = cl.user_session.get("mcp_tools", {})
     mcp_tools[connection.name] = tools  # {'连接名称':[{工具信息},],}
-
     cl.user_session.set("mcp_tools", mcp_tools)
+
+    cl.logger.info(f"MCP 连接成功: {connection.name}, 工具列表: {mcp_tools}")
 
 
 @cl.on_mcp_disconnect

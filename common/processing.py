@@ -71,6 +71,28 @@ tool_list = [
 ]
 
 
+def transform_tool_formatting(mcp_tool: dict) -> list[dict]:
+    """
+    将MCP工具格式转换为OpenAI工具格式
+    :param mcp_tool: MCP工具格式
+    :return: OpenAI格式的工具列表
+    """
+    tools = []
+    for tool in mcp_tool.values():
+        if tool.get("type") == "function":
+            function = tool.get("function", {})
+            tool_dict = {
+                "type": "function",
+                "function": {
+                    "name": function.get("name"),
+                    "description": function.get("description"),
+                    "parameters": function.get("parameters"),
+                },
+            }
+            tools.append(tool_dict)
+    return tools
+
+
 def deal_with_tool_call(tools_param: list) -> list[dict]:
     """
     处理流中所有的切片，组装最终报文
@@ -78,7 +100,7 @@ def deal_with_tool_call(tools_param: list) -> list[dict]:
     :return: 工具调用的最终参数（需要存储到历史记录的信息）
     """
     tool_calls = []
-    groups = group_by_index(tools_param)
+    groups = _group_by_index(tools_param)
     for group in groups:
         tool = {}
         function = {}
@@ -100,7 +122,7 @@ def deal_with_tool_call(tools_param: list) -> list[dict]:
     return tool_calls
 
 
-def group_by_index(data):
+def _group_by_index(data):
     """
     按 index 字段对连续元素分组。
     仅当 data 中相同 index 值总是相邻出现时才正确。
@@ -114,7 +136,7 @@ def group_by_index(data):
 async def main():
     # 调用deepseek，进行意图实验测试
     client = AsyncOpenAI(
-        api_key="",
+        api_key="sk-776f650ee98c4d6299abd336b628b778",
         base_url="https://api.deepseek.com",
     )
 

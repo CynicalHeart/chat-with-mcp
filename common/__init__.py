@@ -1,5 +1,5 @@
 # 从 processing 模块导入 tools
-from .processing import tool_list
+from .processing import tool_list, deal_with_tool_call
 
 # 对外暴露 tools
-__all__ = ["tools"]
+__all__ = ["tool_list", "deal_with_tool_call"]
