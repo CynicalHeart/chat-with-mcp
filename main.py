@@ -81,7 +81,7 @@ async def on_message(message: cl.Message):
     }
     chat_messages: list[dict] = cl.user_session.get("chat_messages")
     chat_messages.append(prompt)
-    mcp_tool = cl.user_session.set("mcp_tools", {})
+    mcp_tool = cl.user_session.get("mcp_tools", {})
 
     # 1、第一次调用AI，携带tools，获取用户意图
     use_tool, resp = await call_llm(chat_messages, tool_list)
