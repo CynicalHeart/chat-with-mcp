@@ -5,7 +5,8 @@ import chainlit as cl
 from mcp import ClientSession
 from openai import AsyncOpenAI
 
-from common import tool_list, deal_with_tool_call
+from common import deal_with_tool_call
+from common.processing import transform_tool_formatting
 
 load_dotenv()
 
@@ -81,9 +82,11 @@ async def on_message(message: cl.Message):
     }
     chat_messages: list[dict] = cl.user_session.get("chat_messages")
     chat_messages.append(prompt)
-    mcp_tool = cl.user_session.get("mcp_tools", {})
+    mcp_tool = cl.user_session.get("mcp_tools")
+    if mcp_tool is not None:
+        tool_list = transform_tool_formatting(mcp_tool)
 
-    # 1、第一次调用AI，携带tools，获取用户意图
+    # 1、第一次调用AI，携带tools，判断用户是否需要调用工具，或者直接获取到请求结果
     use_tool, resp = await call_llm(chat_messages, tool_list)
     cl.logger.info(f"是否使用工具：{use_tool}, 调用LLM结果：{resp=}")
     # 2、解析结果，判断是否需要调用工具
@@ -101,7 +104,7 @@ async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
         model="deepseek-chat",
         messages=chat_question,
         max_tokens=1024,
-        temperature=0.7,
+        temperature=0.5,
         stream=True,
         tools=tool_list,
     )
