@@ -1,10 +1,9 @@
 # 工具列表
-import asyncio
 from openai import AsyncOpenAI
 from itertools import groupby
 from operator import attrgetter
 
-# 示例工作列表
+# 【示例】open-ai的工具列表
 tool_list = [
     {
         "type": "function",
@@ -72,8 +71,8 @@ tool_list = [
 
 
 def transform_tool_formatting(mcp_tool: dict) -> list[dict]:
-    """
-    将MCP工具格式转换为OpenAI工具格式
+    """将MCP工具格式转换为OpenAI工具格式
+
     :param mcp_tool: MCP工具格式
     :return: OpenAI格式的工具列表
     """
@@ -167,7 +166,3 @@ async def main():
         print("\n")
     tool_calls = deal_with_tool_call(tools_param)
     print(f"最终工具调用参数: {tool_calls}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

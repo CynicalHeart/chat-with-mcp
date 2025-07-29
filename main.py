@@ -11,14 +11,16 @@ from common.processing import transform_tool_formatting
 load_dotenv()
 
 # 检查 API 密钥是否存在
-api_key = os.getenv("DEEP_SEEK_API_KEY")
+api_key = os.getenv("API_KEY")
+base_url = os.getenv("BASE_URL", "https://api.deepseek.com")
+model_name = os.getenv("MODEL_NAME", "deepseek-chat")
 if not api_key:
     raise ValueError(
-        "DEEP_SEEK_API_KEY 环境变量未设置。请创建 .env 文件并添加您的 API 密钥。\n"
-        "示例：DEEP_SEEK_API_KEY=your_api_key_here"
+        "API_KEY 环境变量未设置。请创建 .env 文件并添加您的 API 密钥。\n"
+        "示例：API_KEY=your_api_key_here"
     )
 
-client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
 
 @cl.set_starters
@@ -51,7 +53,7 @@ async def on_chat_start():
         },
     ]
     cl.logger.info(msg=f"{msg=}")
-    cl.user_session.set("chat_messages", msg)  # 手动维护聊天上下文
+    cl.user_session.set("chat_messages", msg)  # 手动维护聊天上下文到用户
 
 
 @cl.on_chat_end
@@ -72,9 +74,92 @@ def on_stop():
     cl.logger.info("用户停止本次响应")
 
 
+@cl.on_mcp_connect
+async def on_mcp(connection, session: ClientSession):
+    """MCP 连接"""
+    result = await session.list_tools()
+
+    tools = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "input_schema": t.inputSchema,
+        }
+        for t in result.tools
+    ]
+
+    mcp_tools = cl.user_session.get("mcp_tools", {})
+    mcp_tools[connection.name] = tools  # {'连接名称':[{工具信息},],}
+    cl.user_session.set("mcp_tools", mcp_tools)
+
+    cl.logger.info(f"MCP 连接成功: {connection.name}, 工具列表: {mcp_tools}")
+
+
+@cl.on_mcp_disconnect
+async def on_mcp_disconnect(name: str, _: ClientSession):
+    """MCP 连接断开"""
+    cl.logger.info(f"MCP 连接断开: {name}")
+
+
+@cl.step(type="tool")
+async def call_tool(tool_name, tool_input):
+    """调用工具(MCP)方式回答用户问题
+
+    :param tool_name: 工具名称
+    :param tool_input: 工具输入参数
+    """
+    current_step = cl.context.current_step
+    current_step.name = tool_name
+
+    # Identify which mcp is used
+    mcp_tools = cl.user_session.get("mcp_tools", {})
+    mcp_name = None
+
+    for connection_name, tools in mcp_tools.items():
+        if any(tool.get("name") == tool_name for tool in tools):
+            mcp_name = connection_name
+            break
+
+    if not mcp_name:
+        current_step.output = json.dumps(
+            {"error": f"Tool {tool_name} not found in any MCP connection"}
+        )
+        return current_step.output
+
+    mcp_session, _ = cl.context.session.mcp_sessions.get(mcp_name)
+
+    if not mcp_session:
+        current_step.output = json.dumps(
+            {"error": f"MCP {mcp_name} not found in any MCP connection"}
+        )
+        return current_step.output
+
+    try:
+        current_step.output = await mcp_session.call_tool(
+            tool_name, json.loads(tool_input)
+        )
+    except Exception as e:
+        current_step.output = json.dumps({"error": str(e)})
+
+    return current_step.output
+
+
 @cl.on_message
 async def on_message(message: cl.Message):
-    """处理用户消息"""
+    """处理用户消息并调用LLM，根据需要调用工具
+
+    Args:
+        message: 用户消息对象，包含消息内容和元数据
+
+    Raises:
+        ValueError: 如果消息内容为空
+        RuntimeError: 如果LLM调用失败
+    """
+    if not message.content:
+        cl.logger.warning("收到空消息，跳过处理")
+        await message.send("消息内容不能为空")
+        return
+
     cl.logger.info(f"来自用户的消息为: {message.content}")
     prompt = {
         "role": "user",
@@ -82,26 +167,51 @@ async def on_message(message: cl.Message):
     }
     chat_messages: list[dict] = cl.user_session.get("chat_messages")
     chat_messages.append(prompt)
-    mcp_tool = cl.user_session.get("mcp_tools")
-    if mcp_tool is not None:
-        tool_list = transform_tool_formatting(mcp_tool)
+    mcp_tools = cl.user_session.get("mcp_tools")  # MCP工具列表
+    if mcp_tools is not None:
+        tool_list = transform_tool_formatting(mcp_tools)  # 转换为OpenAI工具格式
 
     # 1、第一次调用AI，携带tools，判断用户是否需要调用工具，或者直接获取到请求结果
     use_tool, resp = await call_llm(chat_messages, tool_list)
     cl.logger.info(f"是否使用工具：{use_tool}, 调用LLM结果：{resp=}")
+    chat_messages.append(resp)
+
     # 2、解析结果，判断是否需要调用工具
+    if use_tool:
+        cl.logger.info("需要调用工具，开始处理工具调用")
+        # 3、如果需要调用工具，则调用工具，使用MCP方式调用
+        tool_calls = resp.get("tool_calls", [])
+        if tool_calls:
+            for tool_call in tool_calls:
+                tool_name = tool_call["function"]["name"]
+                tool_input = tool_call["function"]["arguments"]
+                cl.logger.info(f"调用工具: {tool_name}, 输入参数: {tool_input}")
+                tool_res = await call_tool(tool_name, tool_input)
+                chat_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "name": tool_name,
+                        "content": tool_res,
+                    }
+                )
+            # 4、将调用的工具的结果，拼接到用户的提示词中，再次调用AI，流式返回结果
+            use_tool, resp = await call_llm(chat_messages, tool_list)
+            if use_tool:
+                cl.logger.info("当前不支持循环多次调用工具，需要设计ReAct模式。")
+            chat_messages.append(resp)
+        else:
+            cl.logger.warning("没有找到需要调用的工具")
 
-    # 3、如果需要调用工具，则调用工具，使用MCP方式调用，并function call方式
 
-    # 4、将调用的工具的结果，拼接到用户的提示词中，再次调用AI，流式返回结果
-
-
-async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
+async def call_llm(
+    chat_question: str, tool_list: list[dict] = None
+) -> tuple[bool, dict]:
     """调用AI模型，通过AI判断是否调用工具"""
     msg = cl.Message(content="")
 
     stream = await client.chat.completions.create(
-        model="deepseek-chat",
+        model=model_name,
         messages=chat_question,
         max_tokens=1024,
         temperature=0.5,
@@ -133,73 +243,6 @@ async def call_llm(chat_question: str, tool_list: list[dict] = None) -> bool:
             "role": "assistant",
             "content": msg.content,
         }
-
-
-@cl.on_mcp_connect
-async def on_mcp(connection, session: ClientSession):
-    """MCP 连接"""
-    result = await session.list_tools()
-
-    tools = [
-        {
-            "name": t.name,
-            "description": t.description,
-            "input_schema": t.inputSchema,
-        }
-        for t in result.tools
-    ]
-
-    mcp_tools = cl.user_session.get("mcp_tools", {})
-    mcp_tools[connection.name] = tools  # {'连接名称':[{工具信息},],}
-    cl.user_session.set("mcp_tools", mcp_tools)
-
-    cl.logger.info(f"MCP 连接成功: {connection.name}, 工具列表: {mcp_tools}")
-
-
-@cl.on_mcp_disconnect
-async def on_mcp_disconnect(name: str, _: ClientSession):
-    """MCP 连接断开"""
-    cl.logger.info(f"MCP 连接断开: {name}")
-
-
-@cl.step(type="tool")
-async def call_tool(tool_use):
-    """调用工具(MCP)方式回答用户问题"""
-    tool_name = tool_use.name
-    tool_input = tool_use.input
-
-    current_step = cl.context.current_step
-    current_step.name = tool_name
-
-    # Identify which mcp is used
-    mcp_tools = cl.user_session.get("mcp_tools", {})
-    mcp_name = None
-
-    for connection_name, tools in mcp_tools.items():
-        if any(tool.get("name") == tool_name for tool in tools):
-            mcp_name = connection_name
-            break
-
-    if not mcp_name:
-        current_step.output = json.dumps(
-            {"error": f"Tool {tool_name} not found in any MCP connection"}
-        )
-        return current_step.output
-
-    mcp_session, _ = cl.context.session.mcp_sessions.get(mcp_name)
-
-    if not mcp_session:
-        current_step.output = json.dumps(
-            {"error": f"MCP {mcp_name} not found in any MCP connection"}
-        )
-        return current_step.output
-
-    try:
-        current_step.output = await mcp_session.call_tool(tool_name, tool_input)
-    except Exception as e:
-        current_step.output = json.dumps({"error": str(e)})
-
-    return current_step.output
 
 
 if __name__ == "__main__":
